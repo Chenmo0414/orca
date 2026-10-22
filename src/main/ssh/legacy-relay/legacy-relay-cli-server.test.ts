@@ -123,11 +123,22 @@ describe('the relay-era orca CLI on the desktop runtime', () => {
       messages: [{ id: mail.id }]
     })
 
-    const done = await run(workerDone())
+    const done = await run([
+      ...workerDone(),
+      '--payload',
+      '{"model_signature":"example-model","outcome":"failed"}'
+    ])
     expect(json(done)).toMatchObject({ ok: true })
     expect(json(done).result).not.toHaveProperty('lifecycle.action', 'rejected')
     expect(done.exitCode).toBe(0)
     expect(db.getTask(ids.taskId)?.status).toBe('completed')
+    const completion = db.getInbox().find((message) => message.type === 'worker_done')
+    expect(JSON.parse(completion!.payload!)).toMatchObject({
+      taskId: ids.taskId,
+      dispatchId: ids.dispatchId,
+      outcome: 'succeeded',
+      model_signature: 'example-model'
+    })
     // The verified identity lives only as long as the call.
     expect(runtime.getTerminalProcessIncarnation(WORKER)).toBeNull()
     expect(runtime.getTerminalPaneKey(WORKER)).toBeNull()

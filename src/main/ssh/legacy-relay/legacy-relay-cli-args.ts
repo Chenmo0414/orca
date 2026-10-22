@@ -3,6 +3,7 @@
  * COMPAT(legacy-relay-bridge): revisit 2027-01-15.
  */
 import { CLI_BOOLEAN_FLAGS } from '../../../shared/cli-argument-boundary'
+import { mergeOrchestrationMessagePayload } from '../../../shared/orchestration-message-payload'
 import {
   isOrchestrationRetryRequestId,
   RETRY_REQUEST_ID_GUIDANCE
@@ -70,7 +71,7 @@ export function retryRequestFlag(flags: Map<string, string | boolean>): string |
   return value
 }
 
-/** `--payload`, or the structured flags the worker preamble uses instead of raw JSON. */
+/** Structured worker flags override matching fields in an optional JSON object payload. */
 export function messagePayload(flags: Map<string, string | boolean>): string | undefined {
   const raw = stringFlag(flags, 'payload')
   const fields = {
@@ -85,13 +86,10 @@ export function messagePayload(flags: Map<string, string | boolean>): string | u
   if (!structured) {
     return raw
   }
-  if (raw !== undefined) {
-    throw new Error('Use either --payload or structured payload flags, not both.')
-  }
   if (fields.outcome && fields.outcome !== 'succeeded' && fields.outcome !== 'failed') {
     throw new Error('Invalid --outcome. Expected succeeded or failed.')
   }
-  return JSON.stringify({
+  const merged = mergeOrchestrationMessagePayload(raw, {
     ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value)),
     ...(filesModified
       ? {
@@ -102,4 +100,8 @@ export function messagePayload(flags: Map<string, string | boolean>): string | u
         }
       : {})
   })
+  if ('error' in merged) {
+    throw new Error(merged.error)
+  }
+  return merged.payload
 }

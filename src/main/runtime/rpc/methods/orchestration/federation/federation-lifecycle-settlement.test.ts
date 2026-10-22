@@ -1,5 +1,6 @@
 import '../../../unused-default-rpc-methods.test-fixture'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mergeOrchestrationMessagePayload } from '../../../../../../shared/orchestration-message-payload'
 import {
   ORCHESTRATION_CONTRACT_VERSION,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY,
@@ -155,6 +156,14 @@ describe('orchestration federation lifecycle settlement', () => {
     await homeDispatcher.dispatch(startRequest(taskId))
     homeRuntime.stopOrchestrationFederationRelay()
     const dispatch = homeDb.getDispatchContext(taskId)!
+    const composed = mergeOrchestrationMessagePayload('{"model_signature":"example-model"}', {
+      taskId: reportedTaskId,
+      dispatchId: dispatch.id,
+      outcome: 'succeeded'
+    })
+    if ('error' in composed) {
+      throw new Error(composed.error)
+    }
     const sent = workerDispatcher.dispatch({
       id: 'rpc_waiting_worker_done',
       authToken: 'worker-local-token',
@@ -165,21 +174,18 @@ describe('orchestration federation lifecycle settlement', () => {
         from: 'term_windows_worker',
         subject: 'Done',
         type: 'worker_done',
-        payload: JSON.stringify({
-          taskId: reportedTaskId,
-          dispatchId: dispatch.id,
-          outcome: 'succeeded'
-        })
+        payload: composed.payload
       }
     })
     await vi.waitFor(() =>
       expect(workerDb.listPendingFederationRelay(dispatch.id, 'to_home')).toHaveLength(1)
     )
     expect(workerDb.getRemoteDispatchAttachment(dispatch.id)?.state).toBe('ready')
+    const [relay] = workerDb.listPendingFederationRelay(dispatch.id, 'to_home')
     if (sync) {
       await homeRuntime.syncOrchestrationFederation()
     }
-    return { sent, dispatch }
+    return { sent, dispatch, messageId: relay.message_id }
   }
 
   function dispatchRemoteCompletion(
@@ -224,16 +230,22 @@ describe('orchestration federation lifecycle settlement', () => {
     )
   }
 
-  it('waits for Run-home settlement when an older CLI omits the wait hint', async () => {
+  it('settles a composed worker completion at Run home without a wait hint', async () => {
     const task = createHomeTask()
 
-    const { sent, dispatch } = await sendRemoteCompletion(task.id, task.id)
+    const { sent, dispatch, messageId } = await sendRemoteCompletion(task.id, task.id)
 
     await expect(sent).resolves.toMatchObject({
       ok: true,
       result: { lifecycle: { action: 'completed', authority: 'run_home' } }
     })
     expect(homeDb.getTask(task.id)?.status).toBe('completed')
+    expect(JSON.parse(homeDb.getMessageById(messageId)!.payload!)).toMatchObject({
+      taskId: task.id,
+      dispatchId: dispatch.id,
+      outcome: 'succeeded',
+      model_signature: 'example-model'
+    })
     expect(workerDb.getRemoteDispatchAttachment(dispatch.id)).toMatchObject({
       state: 'succeeded',
       stage: 'worker_report_settled',

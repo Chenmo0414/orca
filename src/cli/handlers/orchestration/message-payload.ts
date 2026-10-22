@@ -1,5 +1,6 @@
 import { getOptionalJsonFlag, getOptionalStringFlag } from '../../flags'
 import { RuntimeClientError } from '../../runtime-client'
+import { mergeOrchestrationMessagePayload } from '../../../shared/orchestration-message-payload'
 
 export function getOptionalStructuredMessagePayload(
   flags: Map<string, string | boolean>
@@ -20,12 +21,6 @@ export function getOptionalStructuredMessagePayload(
     phase !== undefined
   if (!hasStructuredPayload) {
     return rawPayload
-  }
-  if (rawPayload !== undefined) {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      'Use either --payload or structured payload flags, not both.'
-    )
   }
   // Why: raw JSON args are fragile in Windows PowerShell; these flags avoid shell-specific quoting.
   const payload: Record<string, string | string[]> = {}
@@ -56,5 +51,9 @@ export function getOptionalStructuredMessagePayload(
   if (phase) {
     payload.phase = phase
   }
-  return JSON.stringify(payload)
+  const merged = mergeOrchestrationMessagePayload(rawPayload, payload)
+  if ('error' in merged) {
+    throw new RuntimeClientError('invalid_argument', merged.error)
+  }
+  return merged.payload
 }

@@ -144,18 +144,47 @@ describe('orchestration send structured payload flags', () => {
     )
   })
 
-  it('rejects mixing raw payload with structured payload flags', async () => {
+  it('sends extra payload fields with a structured worker completion', async () => {
+    await invokeSend(
+      new Map<string, string | boolean>([
+        ['from', 'term_worker'],
+        ['subject', 'done'],
+        ['type', 'worker_done'],
+        ['payload', '{"model_signature":"example-model"}'],
+        ['task-id', 'task_1'],
+        ['dispatch-id', 'ctx_1'],
+        ['outcome', 'succeeded']
+      ])
+    )
+    expect(callMock).toHaveBeenCalledWith(
+      'orchestration.send',
+      expect.objectContaining({
+        to: undefined,
+        type: 'worker_done',
+        payload: JSON.stringify({
+          model_signature: 'example-model',
+          taskId: 'task_1',
+          dispatchId: 'ctx_1',
+          outcome: 'succeeded'
+        }),
+        waitForLifecycleSettlement: true
+      }),
+      WORKER_DONE_REQUEST
+    )
+  })
+
+  it('rejects a malformed combined payload before sending a completion', async () => {
     await expect(
       invokeSend(
-        new Map<string, string | boolean>([
+        new Map([
           ['from', 'term_worker'],
-          ['to', 'term_coord'],
           ['subject', 'done'],
-          ['payload', '{"taskId":"task_1"}'],
-          ['task-id', 'task_1']
+          ['type', 'worker_done'],
+          ['payload', '{"model_signature":'],
+          ['outcome', 'succeeded']
         ])
       )
-    ).rejects.toThrow(/structured payload/)
+    ).rejects.toMatchObject({ code: 'invalid_argument' })
     expect(callMock).not.toHaveBeenCalled()
   })
 
